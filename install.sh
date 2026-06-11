@@ -42,6 +42,22 @@ ask() { # ask "Prompt" varname [default]
 [ "$(uname -s)" = "Darwin" ] || fail "This installer supports macOS only (for now)."
 ARCH="$(uname -m)"   # arm64 or x86_64
 
+# Non-admin users (no sudo) get user-level installs: ~/Applications for apps,
+# $HUBLE_HOME/node and $HUBLE_HOME/npm-global for the toolchain. Never prompt
+# for a password a user does not have.
+IS_ADMIN=false
+if groups 2>/dev/null | tr ' ' '\n' | grep -qx admin; then IS_ADMIN=true; fi
+
+# Make user-level tool locations visible to this run AND future shells.
+export PATH="$HUBLE_HOME/bin:$HUBLE_HOME/node/bin:$HUBLE_HOME/npm-global/bin:$PATH"
+ensure_path_persisted() {
+  local profile="$HOME/.zprofile" marker="# huble-installer PATH"
+  if ! grep -qs "$marker" "$profile" 2>/dev/null; then
+    printf '\n%s\nexport PATH="%s/bin:%s/node/bin:%s/npm-global/bin:$PATH"\n' \
+      "$marker" "$HUBLE_HOME" "$HUBLE_HOME" "$HUBLE_HOME" >> "$profile"
+  fi
+}
+
 bold ""
 bold "Huble platform installer"
 note "Install root: $HUBLE_HOME"
@@ -59,7 +75,7 @@ fi
 
 # ---------------------------------------------------------------- Obsidian
 step "Checking Obsidian"
-if [ -d "/Applications/Obsidian.app" ]; then
+if [ -d "/Applications/Obsidian.app" ] || [ -d "$HOME/Applications/Obsidian.app" ]; then
   ok "Obsidian installed"
 else
   note "Downloading the latest Obsidian…"
@@ -70,12 +86,24 @@ else
   [ -n "$OBS_URL" ] || fail "Could not find the Obsidian .dmg download URL."
   OBS_DMG="/tmp/Obsidian-latest.dmg"
   curl -fL --progress-bar -o "$OBS_DMG" "$OBS_URL"
-  note "Installing to /Applications (may ask for your password)…"
+  # Admins install system-wide; everyone else gets ~/Applications (works the
+  # same, no password needed).
+  if $IS_ADMIN || [ -w /Applications ]; then APP_DIR="/Applications"; else APP_DIR="$HOME/Applications"; fi
+  mkdir -p "$APP_DIR"
+  note "Installing to $APP_DIR…"
   MOUNT_DIR="$(hdiutil attach "$OBS_DMG" -nobrowse -readonly | sed -n 's/.*\(\/Volumes\/.*\)/\1/p' | tail -1)"
-  cp -R "$MOUNT_DIR/Obsidian.app" /Applications/ 2>/dev/null || sudo cp -R "$MOUNT_DIR/Obsidian.app" /Applications/
+  if ! cp -R "$MOUNT_DIR/Obsidian.app" "$APP_DIR/" 2>/dev/null; then
+    if $IS_ADMIN; then
+      note "Needs your password to write to $APP_DIR…"
+      sudo cp -R "$MOUNT_DIR/Obsidian.app" "$APP_DIR/"
+    else
+      hdiutil detach "$MOUNT_DIR" -quiet || true
+      fail "Could not write to $APP_DIR."
+    fi
+  fi
   hdiutil detach "$MOUNT_DIR" -quiet
   rm -f "$OBS_DMG"
-  ok "Obsidian installed"
+  ok "Obsidian installed in $APP_DIR"
 fi
 
 # ---------------------------------------------------------------- Node
@@ -88,21 +116,31 @@ fi
 if $node_ok; then
   ok "Node $(node --version)"
 else
+  case "$ARCH" in
+    arm64) NODE_ARCH="arm64" ;;
+    *)     NODE_ARCH="x64" ;;
+  esac
+  NODE_VER="$(curl -fsSL https://nodejs.org/dist/index.json | sed -n 's/.*"version": *"\(v22[^"]*\)".*/\1/p' | head -1)"
   if command -v brew >/dev/null 2>&1; then
     note "Installing Node via Homebrew…"
     brew install node >/dev/null
-  else
+  elif $IS_ADMIN; then
     note "Downloading the official Node.js installer…"
-    case "$ARCH" in
-      arm64) NODE_ARCH="arm64" ;;
-      *)     NODE_ARCH="x64" ;;
-    esac
-    NODE_VER="$(curl -fsSL https://nodejs.org/dist/index.json | sed -n 's/.*"version": *"\(v22[^"]*\)".*/\1/p' | head -1)"
     NODE_PKG="/tmp/node-$NODE_VER.pkg"
     curl -fL --progress-bar -o "$NODE_PKG" "https://nodejs.org/dist/$NODE_VER/node-$NODE_VER-$NODE_ARCH.pkg"
     note "Installing Node (asks for your password)…"
     sudo installer -pkg "$NODE_PKG" -target / >/dev/null
     rm -f "$NODE_PKG"
+  else
+    # No admin rights: unpack the official tarball into $HUBLE_HOME/node.
+    note "Installing Node into $HUBLE_HOME/node (no password needed)…"
+    NODE_TAR="/tmp/node-$NODE_VER.tar.gz"
+    curl -fL --progress-bar -o "$NODE_TAR" "https://nodejs.org/dist/$NODE_VER/node-$NODE_VER-darwin-$NODE_ARCH.tar.gz"
+    rm -rf "$HUBLE_HOME/node"
+    mkdir -p "$HUBLE_HOME/node"
+    tar -xzf "$NODE_TAR" -C "$HUBLE_HOME/node" --strip-components 1
+    rm -f "$NODE_TAR"
+    ensure_path_persisted
   fi
   ok "Node $(node --version) installed"
 fi
@@ -127,8 +165,9 @@ if ! command -v gh >/dev/null 2>&1; then
     mkdir -p "$HUBLE_HOME/bin"
     ditto -xk "$GH_ZIP" /tmp/gh-extract
     cp "/tmp/gh-extract/gh_${GH_VER}_${GH_ARCH}/bin/gh" "$HUBLE_HOME/bin/gh"
+    chmod +x "$HUBLE_HOME/bin/gh"
     rm -rf "$GH_ZIP" /tmp/gh-extract
-    export PATH="$HUBLE_HOME/bin:$PATH"
+    ensure_path_persisted
   fi
 fi
 ok "GitHub CLI present"
@@ -158,7 +197,16 @@ if command -v claude >/dev/null 2>&1; then
   ok "Claude Code $(claude --version 2>/dev/null | head -1 || true)"
 else
   note "Installing Claude Code…"
-  npm install -g @anthropic-ai/claude-code >/dev/null 2>&1 || sudo npm install -g @anthropic-ai/claude-code >/dev/null
+  if ! npm install -g @anthropic-ai/claude-code >/dev/null 2>&1; then
+    if $IS_ADMIN; then
+      sudo npm install -g @anthropic-ai/claude-code >/dev/null
+    else
+      # npm's global prefix is not writable: use a user-level prefix instead.
+      npm config set prefix "$HUBLE_HOME/npm-global"
+      npm install -g @anthropic-ai/claude-code >/dev/null
+      ensure_path_persisted
+    fi
+  fi
   ok "Claude Code installed"
   note "After this installer finishes, run:  claude login"
 fi
@@ -220,7 +268,11 @@ if [ -n "$VAULT_PATH" ]; then
   note "Vault: $VAULT_PATH"
   if [ -z "${HUBLE_NO_OPEN:-}" ]; then
     note "Opening the vault in Obsidian…"
-    open "obsidian://open?path=$(printf '%s' "$VAULT_PATH" | sed 's/ /%20/g')" || true
+    # A freshly installed Obsidian has not registered the obsidian:// handler
+    # yet — launch the app itself first in that case.
+    open "obsidian://open?path=$(printf '%s' "$VAULT_PATH" | sed 's/ /%20/g')" 2>/dev/null \
+      || open -a Obsidian 2>/dev/null \
+      || open "$HOME/Applications/Obsidian.app" 2>/dev/null || true
     note "Obsidian will ask you to trust the vault, then enable the Atlas plugin under Community plugins if prompted."
   fi
 fi
