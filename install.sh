@@ -63,11 +63,13 @@ if [ -d "/Applications/Obsidian.app" ]; then
   ok "Obsidian installed"
 else
   note "Downloading the latest Obsidian…"
-  OBS_TAG="$(curl -fsSL https://api.github.com/repos/obsidianmd/obsidian-releases/releases/latest | sed -n 's/.*"tag_name": *"\([^"]*\)".*/\1/p')"
-  OBS_VER="${OBS_TAG#v}"
-  OBS_DMG="/tmp/Obsidian-$OBS_VER.dmg"
-  curl -fL --progress-bar -o "$OBS_DMG" \
-    "https://github.com/obsidianmd/obsidian-releases/releases/download/$OBS_TAG/Obsidian-$OBS_VER-universal.dmg"
+  # Take the .dmg asset URL straight from the release metadata — asset naming
+  # has changed before (no more -universal suffix), so never construct it.
+  OBS_URL="$(curl -fsSL https://api.github.com/repos/obsidianmd/obsidian-releases/releases/latest \
+    | sed -n 's/.*"browser_download_url": *"\([^"]*\.dmg\)".*/\1/p' | head -1)"
+  [ -n "$OBS_URL" ] || fail "Could not find the Obsidian .dmg download URL."
+  OBS_DMG="/tmp/Obsidian-latest.dmg"
+  curl -fL --progress-bar -o "$OBS_DMG" "$OBS_URL"
   note "Installing to /Applications (may ask for your password)…"
   MOUNT_DIR="$(hdiutil attach "$OBS_DMG" -nobrowse -readonly | sed -n 's/.*\(\/Volumes\/.*\)/\1/p' | tail -1)"
   cp -R "$MOUNT_DIR/Obsidian.app" /Applications/ 2>/dev/null || sudo cp -R "$MOUNT_DIR/Obsidian.app" /Applications/
