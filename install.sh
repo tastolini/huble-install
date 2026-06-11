@@ -270,10 +270,19 @@ step "Done"
 if [ -n "$VAULT_PATH" ]; then
   note "Vault: $VAULT_PATH"
   if [ -z "${HUBLE_NO_OPEN:-}" ]; then
+    # Obsidian reads obsidian.json only at startup and REWRITES it from memory
+    # on quit - registering while it runs gets ignored and then overwritten.
+    # Quit it first, register, then relaunch.
+    if pgrep -xq Obsidian; then
+      note "Quitting Obsidian to register the vault..."
+      osascript -e 'tell application "Obsidian" to quit' >/dev/null 2>&1 || true
+      for _ in 1 2 3 4 5 6 7 8 9 10; do
+        pgrep -xq Obsidian || break
+        sleep 1
+      done
+    fi
     note "Registering the vault with Obsidian..."
-    # obsidian://open only resolves vaults Obsidian already knows about -
-    # register ours in obsidian.json first (same record Obsidian writes when
-    # you pick "Open folder as vault").
+    # Same record Obsidian writes when you pick "Open folder as vault".
     node -e '
       const fs = require("fs"), path = require("path"), os = require("os");
       const cfgDir = path.join(os.homedir(), "Library/Application Support/obsidian");
@@ -285,15 +294,20 @@ if [ -n "$VAULT_PATH" ]; then
       const vaultPath = process.argv[1];
       if (!Object.values(cfg.vaults).some(v => v.path === vaultPath)) {
         const id = Array.from({length: 16}, () => "0123456789abcdef"[Math.floor(Math.random()*16)]).join("");
+        for (const v of Object.values(cfg.vaults)) delete v.open;
         cfg.vaults[id] = { path: vaultPath, ts: Date.now(), open: true };
         fs.writeFileSync(cfgPath, JSON.stringify(cfg));
       }
-    ' "$VAULT_PATH"
+      process.stdout.write(encodeURIComponent(vaultPath));
+    ' "$VAULT_PATH" > /tmp/huble-vault-url.txt
+    ENCODED_PATH="$(cat /tmp/huble-vault-url.txt)"
+    rm -f /tmp/huble-vault-url.txt
     note "Opening the vault in Obsidian..."
-    open "obsidian://open?path=$(printf '%s' "$VAULT_PATH" | sed 's/ /%20/g')" 2>/dev/null \
+    open "obsidian://open?path=$ENCODED_PATH" 2>/dev/null \
       || open -a Obsidian 2>/dev/null \
       || open "$HOME/Applications/Obsidian.app" 2>/dev/null || true
     note "Obsidian will ask you to trust the vault, then enable the Atlas plugin under Community plugins if prompted."
+    note "If the vault does not open: in Obsidian's vault picker choose 'Open folder as vault' and select $VAULT_PATH"
   fi
 fi
 note "Platform: $PLATFORM_DIR  (re-run this installer any time to update everything)"
