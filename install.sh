@@ -29,6 +29,16 @@ HUBLE_HOME="${HUBLE_HOME:-$HOME/.huble}"
 migrate_legacy_home() {
   local old="$HOME/Huble"
   [ "$HUBLE_HOME" = "$HOME/.huble" ] || return 0
+  # Config rewrites run UNCONDITIONALLY - a stale npm prefix or PATH block can
+  # outlive the old folder (and a stale prefix resurrects it on any npm -g).
+  if [ -f "$HOME/.npmrc" ] && grep -qs "$old" "$HOME/.npmrc"; then
+    sed -i '' "s|$old/|$HUBLE_HOME/|g" "$HOME/.npmrc" 2>/dev/null || true
+    printf '  - Repointed npm prefix in ~/.npmrc\n'
+  fi
+  if [ -f "$HOME/.zprofile" ] && grep -qs "$old" "$HOME/.zprofile"; then
+    sed -i '' "s|$old/|$HUBLE_HOME/|g" "$HOME/.zprofile" 2>/dev/null || true
+    printf '  - Repointed PATH block in ~/.zprofile\n'
+  fi
   [ -d "$old" ] || return 0
   # Tooling dirs found under the old layout move over (idempotent - also
   # catches stragglers like an npm-global recreated by a stale .npmrc).
@@ -59,15 +69,6 @@ migrate_legacy_home() {
         if (next !== raw) { fs.writeFileSync(cfgPath, next); console.log("  - repointed", cfgPath); }
       }
     ' "$old" "$HUBLE_HOME" "$old/vaults"
-  fi
-  # Rewrite the PATH block we wrote earlier.
-  if [ -f "$HOME/.zprofile" ] && grep -qs "$old" "$HOME/.zprofile"; then
-    sed -i '' "s|$old/|$HUBLE_HOME/|g" "$HOME/.zprofile" 2>/dev/null || true
-  fi
-  # npm's persisted prefix (non-admin installs) points at the old path and
-  # would silently recreate ~/Huble/npm-global on the next global install.
-  if [ -f "$HOME/.npmrc" ] && grep -qs "$old" "$HOME/.npmrc"; then
-    sed -i '' "s|$old/|$HUBLE_HOME/|g" "$HOME/.npmrc" 2>/dev/null || true
   fi
   rmdir "$old" 2>/dev/null || true
 }
