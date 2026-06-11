@@ -29,12 +29,22 @@ HUBLE_HOME="${HUBLE_HOME:-$HOME/.huble}"
 migrate_legacy_home() {
   local old="$HOME/Huble"
   [ "$HUBLE_HOME" = "$HOME/.huble" ] || return 0
-  [ -d "$old/platform/.git" ] || return 0
-  [ -d "$HUBLE_HOME/platform/.git" ] && return 0
-  printf '  - Migrating tooling from %s to %s...\n' "$old" "$HUBLE_HOME"
+  [ -d "$old" ] || return 0
+  # Tooling dirs found under the old layout move over (idempotent - also
+  # catches stragglers like an npm-global recreated by a stale .npmrc).
+  local moved=false
   mkdir -p "$HUBLE_HOME"
   for d in platform node npm-global bin; do
-    [ -e "$old/$d" ] && [ ! -e "$HUBLE_HOME/$d" ] && mv "$old/$d" "$HUBLE_HOME/$d"
+    if [ -e "$old/$d" ] && [ ! -e "$HUBLE_HOME/$d" ]; then
+      $moved || printf '  - Migrating tooling from %s to %s...\n' "$old" "$HUBLE_HOME"
+      moved=true
+      mv "$old/$d" "$HUBLE_HOME/$d"
+    fi
+  done
+  # A leftover dir that exists on BOTH sides (recreated after migration) is
+  # tooling debris - the hidden side wins.
+  for d in npm-global bin; do
+    [ -e "$old/$d" ] && [ -e "$HUBLE_HOME/$d" ] && rm -rf "$old/$d"
   done
   # Repoint pipelineRoot in any vaults still living under the old layout.
   if [ -d "$old/vaults" ] && command -v node >/dev/null 2>&1; then
