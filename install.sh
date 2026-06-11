@@ -1,0 +1,229 @@
+#!/bin/bash
+# Huble platform installer — sets up everything a team member needs:
+#   Obsidian, Node, GitHub access, the Huble platform, the Claude agent CLI,
+#   and a client vault with the Atlas plugin preconfigured for your role.
+#
+# Usage (one line, run it again any time to update):
+#   curl -fsSL https://raw.githubusercontent.com/tastolini/huble-install/main/install.sh | bash
+#
+# Non-interactive overrides (mostly for testing):
+#   HUBLE_HOME=~/Huble            install root
+#   HUBLE_PLATFORM_REPO=tastolini/huble-platform
+#   HUBLE_ROLE=cx|copy|seo        skip the role prompt
+#   HUBLE_VAULT_MODE=new|clone|skip
+#   HUBLE_CLIENT_NAME="Client"    with HUBLE_VAULT_MODE=new
+#   HUBLE_VAULT_REPO=owner/repo   with HUBLE_VAULT_MODE=clone
+#   HUBLE_NO_OPEN=1               don't open Obsidian at the end
+set -euo pipefail
+
+HUBLE_HOME="${HUBLE_HOME:-$HOME/Huble}"
+PLATFORM_REPO="${HUBLE_PLATFORM_REPO:-tastolini/huble-platform}"
+PLATFORM_DIR="$HUBLE_HOME/platform"
+VAULTS_DIR="$HUBLE_HOME/vaults"
+MIN_NODE_MAJOR=18
+
+bold()  { printf '\033[1m%s\033[0m\n' "$*"; }
+step()  { printf '\n\033[1;34m==>\033[0m \033[1m%s\033[0m\n' "$*"; }
+ok()    { printf '\033[32m  ✓ %s\033[0m\n' "$*"; }
+note()  { printf '  · %s\n' "$*"; }
+fail()  { printf '\033[31m  ✗ %s\033[0m\n' "$*" >&2; exit 1; }
+
+# Reading prompts must come from the terminal even when the script itself is
+# piped in via curl | bash.
+ask() { # ask "Prompt" varname [default]
+  local prompt="$1" var="$2" default="${3:-}" answer
+  if [ -n "$default" ]; then prompt="$prompt [$default]"; fi
+  printf '%s: ' "$prompt" > /dev/tty
+  IFS= read -r answer < /dev/tty || answer=""
+  if [ -z "$answer" ]; then answer="$default"; fi
+  eval "$var=\"\$answer\""
+}
+
+[ "$(uname -s)" = "Darwin" ] || fail "This installer supports macOS only (for now)."
+ARCH="$(uname -m)"   # arm64 or x86_64
+
+bold ""
+bold "Huble platform installer"
+note "Install root: $HUBLE_HOME"
+mkdir -p "$HUBLE_HOME" "$VAULTS_DIR"
+
+# ---------------------------------------------------------------- Xcode CLT / git
+step "Checking developer tools (git)"
+if xcode-select -p >/dev/null 2>&1; then
+  ok "Command Line Tools present"
+else
+  note "Triggering the macOS Command Line Tools install dialog — click Install, then re-run this script."
+  xcode-select --install >/dev/null 2>&1 || true
+  fail "Re-run the installer once the Command Line Tools have finished installing."
+fi
+
+# ---------------------------------------------------------------- Obsidian
+step "Checking Obsidian"
+if [ -d "/Applications/Obsidian.app" ]; then
+  ok "Obsidian installed"
+else
+  note "Downloading the latest Obsidian…"
+  OBS_TAG="$(curl -fsSL https://api.github.com/repos/obsidianmd/obsidian-releases/releases/latest | sed -n 's/.*"tag_name": *"\([^"]*\)".*/\1/p')"
+  OBS_VER="${OBS_TAG#v}"
+  OBS_DMG="/tmp/Obsidian-$OBS_VER.dmg"
+  curl -fL --progress-bar -o "$OBS_DMG" \
+    "https://github.com/obsidianmd/obsidian-releases/releases/download/$OBS_TAG/Obsidian-$OBS_VER-universal.dmg"
+  note "Installing to /Applications (may ask for your password)…"
+  MOUNT_DIR="$(hdiutil attach "$OBS_DMG" -nobrowse -readonly | sed -n 's/.*\(\/Volumes\/.*\)/\1/p' | tail -1)"
+  cp -R "$MOUNT_DIR/Obsidian.app" /Applications/ 2>/dev/null || sudo cp -R "$MOUNT_DIR/Obsidian.app" /Applications/
+  hdiutil detach "$MOUNT_DIR" -quiet
+  rm -f "$OBS_DMG"
+  ok "Obsidian installed"
+fi
+
+# ---------------------------------------------------------------- Node
+step "Checking Node.js (>= $MIN_NODE_MAJOR)"
+node_ok=false
+if command -v node >/dev/null 2>&1; then
+  NODE_MAJOR="$(node -p 'process.versions.node.split(".")[0]')"
+  if [ "$NODE_MAJOR" -ge "$MIN_NODE_MAJOR" ]; then node_ok=true; fi
+fi
+if $node_ok; then
+  ok "Node $(node --version)"
+else
+  if command -v brew >/dev/null 2>&1; then
+    note "Installing Node via Homebrew…"
+    brew install node >/dev/null
+  else
+    note "Downloading the official Node.js installer…"
+    case "$ARCH" in
+      arm64) NODE_ARCH="arm64" ;;
+      *)     NODE_ARCH="x64" ;;
+    esac
+    NODE_VER="$(curl -fsSL https://nodejs.org/dist/index.json | sed -n 's/.*"version": *"\(v22[^"]*\)".*/\1/p' | head -1)"
+    NODE_PKG="/tmp/node-$NODE_VER.pkg"
+    curl -fL --progress-bar -o "$NODE_PKG" "https://nodejs.org/dist/$NODE_VER/node-$NODE_VER-$NODE_ARCH.pkg"
+    note "Installing Node (asks for your password)…"
+    sudo installer -pkg "$NODE_PKG" -target / >/dev/null
+    rm -f "$NODE_PKG"
+  fi
+  ok "Node $(node --version) installed"
+fi
+
+# ---------------------------------------------------------------- GitHub CLI + auth
+step "Checking GitHub access"
+if ! command -v gh >/dev/null 2>&1; then
+  if command -v brew >/dev/null 2>&1; then
+    note "Installing GitHub CLI via Homebrew…"
+    brew install gh >/dev/null
+  else
+    note "Installing GitHub CLI…"
+    GH_TAG="$(curl -fsSL https://api.github.com/repos/cli/cli/releases/latest | sed -n 's/.*"tag_name": *"\([^"]*\)".*/\1/p')"
+    GH_VER="${GH_TAG#v}"
+    case "$ARCH" in
+      arm64) GH_ARCH="macOS_arm64" ;;
+      *)     GH_ARCH="macOS_amd64" ;;
+    esac
+    GH_ZIP="/tmp/gh.zip"
+    curl -fL --progress-bar -o "$GH_ZIP" \
+      "https://github.com/cli/cli/releases/download/$GH_TAG/gh_${GH_VER}_${GH_ARCH}.zip"
+    mkdir -p "$HUBLE_HOME/bin"
+    ditto -xk "$GH_ZIP" /tmp/gh-extract
+    cp "/tmp/gh-extract/gh_${GH_VER}_${GH_ARCH}/bin/gh" "$HUBLE_HOME/bin/gh"
+    rm -rf "$GH_ZIP" /tmp/gh-extract
+    export PATH="$HUBLE_HOME/bin:$PATH"
+  fi
+fi
+ok "GitHub CLI present"
+if gh auth status >/dev/null 2>&1; then
+  ok "GitHub authenticated as $(gh api user --jq .login 2>/dev/null || echo '?')"
+else
+  note "Sign in to GitHub — a browser window will guide you (device code flow)."
+  gh auth login --hostname github.com --git-protocol https --web < /dev/tty
+fi
+
+# ---------------------------------------------------------------- Platform repo
+step "Installing the Huble platform"
+if [ -d "$PLATFORM_DIR/.git" ]; then
+  note "Updating existing platform checkout…"
+  git -C "$PLATFORM_DIR" pull --ff-only || note "Pull failed (local changes?) — keeping current version."
+else
+  gh repo clone "$PLATFORM_REPO" "$PLATFORM_DIR" -- --depth 1
+fi
+HUBLE="$PLATFORM_DIR/huble-pipeline/bin/huble"
+[ -x "$HUBLE" ] || chmod +x "$HUBLE" 2>/dev/null || true
+[ -f "$HUBLE" ] || fail "Platform clone incomplete: $HUBLE not found."
+ok "Platform at $PLATFORM_DIR"
+
+# ---------------------------------------------------------------- Claude Code CLI
+step "Checking Claude Code (agent CLI)"
+if command -v claude >/dev/null 2>&1; then
+  ok "Claude Code $(claude --version 2>/dev/null | head -1 || true)"
+else
+  note "Installing Claude Code…"
+  npm install -g @anthropic-ai/claude-code >/dev/null 2>&1 || sudo npm install -g @anthropic-ai/claude-code >/dev/null
+  ok "Claude Code installed"
+  note "After this installer finishes, run:  claude login"
+fi
+
+# ---------------------------------------------------------------- Client vault
+step "Setting up a client vault"
+VAULT_MODE="${HUBLE_VAULT_MODE:-}"
+if [ -z "$VAULT_MODE" ]; then
+  printf '  How do you want to start?\n' > /dev/tty
+  printf '    1) Clone an existing client vault from GitHub\n' > /dev/tty
+  printf '    2) Create a new client vault\n' > /dev/tty
+  printf '    3) Skip — I already have my vault\n' > /dev/tty
+  ask "  Choose 1/2/3" choice "3"
+  case "$choice" in
+    1) VAULT_MODE="clone" ;;
+    2) VAULT_MODE="new" ;;
+    *) VAULT_MODE="skip" ;;
+  esac
+fi
+
+VAULT_PATH=""
+case "$VAULT_MODE" in
+  clone)
+    REPO="${HUBLE_VAULT_REPO:-}"
+    if [ -z "$REPO" ]; then ask "  Vault repo (owner/name)" REPO; fi
+    VAULT_PATH="$VAULTS_DIR/$(basename "$REPO")"
+    if [ -d "$VAULT_PATH/.git" ]; then
+      git -C "$VAULT_PATH" pull --ff-only || true
+    else
+      gh repo clone "$REPO" "$VAULT_PATH"
+    fi
+    ;;
+  new)
+    CLIENT="${HUBLE_CLIENT_NAME:-}"
+    if [ -z "$CLIENT" ]; then ask "  Client name" CLIENT; fi
+    [ -n "$CLIENT" ] || fail "Client name required."
+    VAULT_PATH="$VAULTS_DIR/$CLIENT"
+    "$HUBLE" vault init --client "$CLIENT" --vault "$VAULT_PATH"
+    ;;
+  skip)
+    note "Skipping vault setup."
+    ;;
+esac
+
+# ---------------------------------------------------------------- Role + plugin
+if [ -n "$VAULT_PATH" ]; then
+  ROLE="${HUBLE_ROLE:-}"
+  if [ -z "$ROLE" ]; then
+    ask "  Your role (cx / copy / seo)" ROLE "cx"
+  fi
+  step "Installing the Atlas plugin (role: $ROLE)"
+  "$HUBLE" cx init --vault "$VAULT_PATH" --role "$ROLE"
+  ok "Atlas plugin installed and enabled, role set to $ROLE"
+fi
+
+# ---------------------------------------------------------------- Done
+step "Done"
+if [ -n "$VAULT_PATH" ]; then
+  note "Vault: $VAULT_PATH"
+  if [ -z "${HUBLE_NO_OPEN:-}" ]; then
+    note "Opening the vault in Obsidian…"
+    open "obsidian://open?path=$(printf '%s' "$VAULT_PATH" | sed 's/ /%20/g')" || true
+    note "Obsidian will ask you to trust the vault, then enable the Atlas plugin under Community plugins if prompted."
+  fi
+fi
+note "Platform: $PLATFORM_DIR  (re-run this installer any time to update everything)"
+if ! command -v claude >/dev/null 2>&1 || ! [ -e "$HOME/.claude" ]; then
+  note "Remember to authenticate the agent CLI once:  claude login"
+fi
+bold ""
