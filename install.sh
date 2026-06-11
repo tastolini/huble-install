@@ -21,11 +21,42 @@
 set -euo pipefail
 
 # Tooling lives hidden in ~/.huble (platform checkout, user-level node/npm/gh).
-# Legacy installs at ~/Huble keep working - we respect an existing checkout.
 HUBLE_HOME="${HUBLE_HOME:-$HOME/.huble}"
-if [ ! -d "$HUBLE_HOME/platform/.git" ] && [ -d "$HOME/Huble/platform/.git" ]; then
-  HUBLE_HOME="$HOME/Huble"
-fi
+
+# One-time migration from the old visible ~/Huble layout: move the tooling
+# dirs into ~/.huble, repoint vault pipelineRoot configs and the .zprofile
+# PATH block, and leave ~/Huble holding only vaults (delete it when empty).
+migrate_legacy_home() {
+  local old="$HOME/Huble"
+  [ "$HUBLE_HOME" = "$HOME/.huble" ] || return 0
+  [ -d "$old/platform/.git" ] || return 0
+  [ -d "$HUBLE_HOME/platform/.git" ] && return 0
+  printf '  - Migrating tooling from %s to %s...\n' "$old" "$HUBLE_HOME"
+  mkdir -p "$HUBLE_HOME"
+  for d in platform node npm-global bin; do
+    [ -e "$old/$d" ] && [ ! -e "$HUBLE_HOME/$d" ] && mv "$old/$d" "$HUBLE_HOME/$d"
+  done
+  # Repoint pipelineRoot in any vaults still living under the old layout.
+  if [ -d "$old/vaults" ] && command -v node >/dev/null 2>&1; then
+    node -e '
+      const fs = require("fs"), path = require("path");
+      const [oldHome, newHome, vaultsDir] = process.argv.slice(1);
+      for (const name of fs.readdirSync(vaultsDir)) {
+        const cfgPath = path.join(vaultsDir, name, "project-config.json");
+        if (!fs.existsSync(cfgPath)) continue;
+        const raw = fs.readFileSync(cfgPath, "utf8");
+        const next = raw.split(oldHome + "/platform").join(newHome + "/platform");
+        if (next !== raw) { fs.writeFileSync(cfgPath, next); console.log("  - repointed", cfgPath); }
+      }
+    ' "$old" "$HUBLE_HOME" "$old/vaults"
+  fi
+  # Rewrite the PATH block we wrote earlier.
+  if [ -f "$HOME/.zprofile" ] && grep -qs "$old" "$HOME/.zprofile"; then
+    sed -i '' "s|$old/|$HUBLE_HOME/|g" "$HOME/.zprofile" 2>/dev/null || true
+  fi
+  rmdir "$old" 2>/dev/null || true
+}
+migrate_legacy_home
 PLATFORM_REPO="${HUBLE_PLATFORM_REPO:-tastolini/huble-platform}"
 PLATFORM_DIR="$HUBLE_HOME/platform"
 # Vaults are USER-VISIBLE work and go where the installer is launched from -
