@@ -1,5 +1,5 @@
 #!/bin/bash
-# Huble platform installer — sets up everything a team member needs:
+# Huble platform installer - sets up everything a team member needs:
 #   Obsidian, Node, GitHub access, the Huble platform, the Claude agent CLI,
 #   and a client vault with the Atlas plugin preconfigured for your role.
 #
@@ -24,9 +24,9 @@ MIN_NODE_MAJOR=18
 
 bold()  { printf '\033[1m%s\033[0m\n' "$*"; }
 step()  { printf '\n\033[1;34m==>\033[0m \033[1m%s\033[0m\n' "$*"; }
-ok()    { printf '\033[32m  ✓ %s\033[0m\n' "$*"; }
-note()  { printf '  · %s\n' "$*"; }
-fail()  { printf '\033[31m  ✗ %s\033[0m\n' "$*" >&2; exit 1; }
+ok()    { printf '\033[32m  OK %s\033[0m\n' "$*"; }
+note()  { printf '  - %s\n' "$*"; }
+fail()  { printf '\033[31m  X %s\033[0m\n' "$*" >&2; exit 1; }
 
 # Reading prompts must come from the terminal even when the script itself is
 # piped in via curl | bash.
@@ -68,7 +68,7 @@ step "Checking developer tools (git)"
 if xcode-select -p >/dev/null 2>&1; then
   ok "Command Line Tools present"
 else
-  note "Triggering the macOS Command Line Tools install dialog — click Install, then re-run this script."
+  note "Triggering the macOS Command Line Tools install dialog - click Install, then re-run this script."
   xcode-select --install >/dev/null 2>&1 || true
   fail "Re-run the installer once the Command Line Tools have finished installing."
 fi
@@ -78,8 +78,8 @@ step "Checking Obsidian"
 if [ -d "/Applications/Obsidian.app" ] || [ -d "$HOME/Applications/Obsidian.app" ]; then
   ok "Obsidian installed"
 else
-  note "Downloading the latest Obsidian…"
-  # Take the .dmg asset URL straight from the release metadata — asset naming
+  note "Downloading the latest Obsidian..."
+  # Take the .dmg asset URL straight from the release metadata - asset naming
   # has changed before (no more -universal suffix), so never construct it.
   OBS_URL="$(curl -fsSL https://api.github.com/repos/obsidianmd/obsidian-releases/releases/latest \
     | sed -n 's/.*"browser_download_url": *"\([^"]*\.dmg\)".*/\1/p' | head -1)"
@@ -90,11 +90,11 @@ else
   # same, no password needed).
   if $IS_ADMIN || [ -w /Applications ]; then APP_DIR="/Applications"; else APP_DIR="$HOME/Applications"; fi
   mkdir -p "$APP_DIR"
-  note "Installing to $APP_DIR…"
+  note "Installing to $APP_DIR..."
   MOUNT_DIR="$(hdiutil attach "$OBS_DMG" -nobrowse -readonly | sed -n 's/.*\(\/Volumes\/.*\)/\1/p' | tail -1)"
   if ! cp -R "$MOUNT_DIR/Obsidian.app" "$APP_DIR/" 2>/dev/null; then
     if $IS_ADMIN; then
-      note "Needs your password to write to $APP_DIR…"
+      note "Needs your password to write to $APP_DIR..."
       sudo cp -R "$MOUNT_DIR/Obsidian.app" "$APP_DIR/"
     else
       hdiutil detach "$MOUNT_DIR" -quiet || true
@@ -122,18 +122,18 @@ else
   esac
   NODE_VER="$(curl -fsSL https://nodejs.org/dist/index.json | sed -n 's/.*"version": *"\(v22[^"]*\)".*/\1/p' | head -1)"
   if command -v brew >/dev/null 2>&1; then
-    note "Installing Node via Homebrew…"
+    note "Installing Node via Homebrew..."
     brew install node >/dev/null
   elif $IS_ADMIN; then
-    note "Downloading the official Node.js installer…"
+    note "Downloading the official Node.js installer..."
     NODE_PKG="/tmp/node-$NODE_VER.pkg"
     curl -fL --progress-bar -o "$NODE_PKG" "https://nodejs.org/dist/$NODE_VER/node-$NODE_VER-$NODE_ARCH.pkg"
-    note "Installing Node (asks for your password)…"
+    note "Installing Node (asks for your password)..."
     sudo installer -pkg "$NODE_PKG" -target / >/dev/null
     rm -f "$NODE_PKG"
   else
     # No admin rights: unpack the official tarball into $HUBLE_HOME/node.
-    note "Installing Node into $HUBLE_HOME/node (no password needed)…"
+    note "Installing Node into $HUBLE_HOME/node (no password needed)..."
     NODE_TAR="/tmp/node-$NODE_VER.tar.gz"
     curl -fL --progress-bar -o "$NODE_TAR" "https://nodejs.org/dist/$NODE_VER/node-$NODE_VER-darwin-$NODE_ARCH.tar.gz"
     rm -rf "$HUBLE_HOME/node"
@@ -149,10 +149,10 @@ fi
 step "Checking GitHub access"
 if ! command -v gh >/dev/null 2>&1; then
   if command -v brew >/dev/null 2>&1; then
-    note "Installing GitHub CLI via Homebrew…"
+    note "Installing GitHub CLI via Homebrew..."
     brew install gh >/dev/null
   else
-    note "Installing GitHub CLI…"
+    note "Installing GitHub CLI..."
     GH_TAG="$(curl -fsSL https://api.github.com/repos/cli/cli/releases/latest | sed -n 's/.*"tag_name": *"\([^"]*\)".*/\1/p')"
     GH_VER="${GH_TAG#v}"
     case "$ARCH" in
@@ -174,15 +174,15 @@ ok "GitHub CLI present"
 if gh auth status >/dev/null 2>&1; then
   ok "GitHub authenticated as $(gh api user --jq .login 2>/dev/null || echo '?')"
 else
-  note "Sign in to GitHub — a browser window will guide you (device code flow)."
+  note "Sign in to GitHub - a browser window will guide you (device code flow)."
   gh auth login --hostname github.com --git-protocol https --web < /dev/tty
 fi
 
 # ---------------------------------------------------------------- Platform repo
 step "Installing the Huble platform"
 if [ -d "$PLATFORM_DIR/.git" ]; then
-  note "Updating existing platform checkout…"
-  git -C "$PLATFORM_DIR" pull --ff-only || note "Pull failed (local changes?) — keeping current version."
+  note "Updating existing platform checkout..."
+  git -C "$PLATFORM_DIR" pull --ff-only || note "Pull failed (local changes?) - keeping current version."
 else
   gh repo clone "$PLATFORM_REPO" "$PLATFORM_DIR" -- --depth 1
 fi
@@ -196,7 +196,7 @@ step "Checking Claude Code (agent CLI)"
 if command -v claude >/dev/null 2>&1; then
   ok "Claude Code $(claude --version 2>/dev/null | head -1 || true)"
 else
-  note "Installing Claude Code…"
+  note "Installing Claude Code..."
   if ! npm install -g @anthropic-ai/claude-code >/dev/null 2>&1; then
     if $IS_ADMIN; then
       sudo npm install -g @anthropic-ai/claude-code >/dev/null
@@ -218,7 +218,7 @@ if [ -z "$VAULT_MODE" ]; then
   printf '  How do you want to start?\n' > /dev/tty
   printf '    1) Clone an existing client vault from GitHub\n' > /dev/tty
   printf '    2) Create a new client vault\n' > /dev/tty
-  printf '    3) Skip — I already have my vault\n' > /dev/tty
+  printf '    3) Skip - I already have my vault\n' > /dev/tty
   ask "  Choose 1/2/3" choice "3"
   case "$choice" in
     1) VAULT_MODE="clone" ;;
@@ -267,9 +267,9 @@ step "Done"
 if [ -n "$VAULT_PATH" ]; then
   note "Vault: $VAULT_PATH"
   if [ -z "${HUBLE_NO_OPEN:-}" ]; then
-    note "Opening the vault in Obsidian…"
+    note "Opening the vault in Obsidian..."
     # A freshly installed Obsidian has not registered the obsidian:// handler
-    # yet — launch the app itself first in that case.
+    # yet - launch the app itself first in that case.
     open "obsidian://open?path=$(printf '%s' "$VAULT_PATH" | sed 's/ /%20/g')" 2>/dev/null \
       || open -a Obsidian 2>/dev/null \
       || open "$HOME/Applications/Obsidian.app" 2>/dev/null || true
