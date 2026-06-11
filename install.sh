@@ -183,11 +183,16 @@ step "Installing the Huble platform"
 if [ -d "$PLATFORM_DIR/.git" ]; then
   note "Updating existing platform checkout..."
   git -C "$PLATFORM_DIR" pull --ff-only || note "Pull failed (local changes?) - keeping current version."
+  # Older installs sparse-checked plugins/ too; narrow them to the pipeline.
+  if [ -f "$PLATFORM_DIR/.git/info/sparse-checkout" ]; then
+    git -C "$PLATFORM_DIR" sparse-checkout set --cone huble-pipeline 2>/dev/null || true
+  fi
 else
-  # Team machines need the pipeline + the plugin bundle, not client vaults or
-  # planning docs: sparse checkout keeps the clone lean.
+  # Team machines need the pipeline only - it carries the committed plugin
+  # dist (huble-pipeline/dist/atlas-cx) that cx init installs from. No plugin
+  # sources, no client vaults, no planning docs.
   gh repo clone "$PLATFORM_REPO" "$PLATFORM_DIR" -- --depth 1 --sparse
-  git -C "$PLATFORM_DIR" sparse-checkout set --cone huble-pipeline plugins
+  git -C "$PLATFORM_DIR" sparse-checkout set --cone huble-pipeline
 fi
 HUBLE="$PLATFORM_DIR/huble-pipeline/bin/huble"
 [ -x "$HUBLE" ] || chmod +x "$HUBLE" 2>/dev/null || true
