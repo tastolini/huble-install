@@ -9,6 +9,10 @@ the Atlas plugin preconfigured for your role (CX / Copy / SEO).
 curl -fsSL https://raw.githubusercontent.com/tastolini/huble-install/main/install.sh | bash
 ```
 
+Run it **from the folder where you want your client vaults** — secondary
+drive, `~/Work/Clients`, anywhere. Vaults are created there; all tooling
+(platform, node, CLIs) stays hidden in `~/.huble`.
+
 Safe to re-run any time: it updates the platform and the plugin in lockstep
 and never touches your per-machine settings (role, agent preferences, API
 keys are merged, not overwritten).

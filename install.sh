@@ -6,8 +6,12 @@
 # Usage (one line, run it again any time to update):
 #   curl -fsSL https://raw.githubusercontent.com/tastolini/huble-install/main/install.sh | bash
 #
+# Vaults are created in the folder you run the installer from (any drive);
+# tooling hides in ~/.huble.
+#
 # Non-interactive overrides (mostly for testing):
-#   HUBLE_HOME=~/Huble            install root
+#   HUBLE_HOME=~/.huble           hidden tooling root (platform/node/npm/gh)
+#   HUBLE_VAULTS_DIR=/path        where vaults go (default: the launch folder)
 #   HUBLE_PLATFORM_REPO=tastolini/huble-platform
 #   HUBLE_ROLE=cx|copy|seo        skip the role prompt
 #   HUBLE_VAULT_MODE=new|clone|skip
@@ -16,10 +20,19 @@
 #   HUBLE_NO_OPEN=1               don't open Obsidian at the end
 set -euo pipefail
 
-HUBLE_HOME="${HUBLE_HOME:-$HOME/Huble}"
+# Tooling lives hidden in ~/.huble (platform checkout, user-level node/npm/gh).
+# Legacy installs at ~/Huble keep working - we respect an existing checkout.
+HUBLE_HOME="${HUBLE_HOME:-$HOME/.huble}"
+if [ ! -d "$HUBLE_HOME/platform/.git" ] && [ -d "$HOME/Huble/platform/.git" ]; then
+  HUBLE_HOME="$HOME/Huble"
+fi
 PLATFORM_REPO="${HUBLE_PLATFORM_REPO:-tastolini/huble-platform}"
 PLATFORM_DIR="$HUBLE_HOME/platform"
-VAULTS_DIR="$HUBLE_HOME/vaults"
+# Vaults are USER-VISIBLE work and go where the installer is launched from -
+# run it from the folder (any drive) where you want client vaults to live.
+LAUNCH_DIR="$(pwd)"
+if [ "$LAUNCH_DIR" = "/" ] || [ ! -w "$LAUNCH_DIR" ]; then LAUNCH_DIR="$HOME"; fi
+VAULTS_DIR="${HUBLE_VAULTS_DIR:-$LAUNCH_DIR}"
 MIN_NODE_MAJOR=18
 
 bold()  { printf '\033[1m%s\033[0m\n' "$*"; }
@@ -60,7 +73,8 @@ ensure_path_persisted() {
 
 bold ""
 bold "Huble platform installer"
-note "Install root: $HUBLE_HOME"
+note "Tooling (hidden): $HUBLE_HOME"
+note "Vaults go to: $VAULTS_DIR  (run the installer from the folder where you want them)"
 mkdir -p "$HUBLE_HOME" "$VAULTS_DIR"
 
 # ---------------------------------------------------------------- Xcode CLT / git
