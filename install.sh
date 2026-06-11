@@ -54,6 +54,11 @@ migrate_legacy_home() {
   if [ -f "$HOME/.zprofile" ] && grep -qs "$old" "$HOME/.zprofile"; then
     sed -i '' "s|$old/|$HUBLE_HOME/|g" "$HOME/.zprofile" 2>/dev/null || true
   fi
+  # npm's persisted prefix (non-admin installs) points at the old path and
+  # would silently recreate ~/Huble/npm-global on the next global install.
+  if [ -f "$HOME/.npmrc" ] && grep -qs "$old" "$HOME/.npmrc"; then
+    sed -i '' "s|$old/|$HUBLE_HOME/|g" "$HOME/.npmrc" 2>/dev/null || true
+  fi
   rmdir "$old" 2>/dev/null || true
 }
 migrate_legacy_home
