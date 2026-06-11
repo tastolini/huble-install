@@ -184,7 +184,10 @@ if [ -d "$PLATFORM_DIR/.git" ]; then
   note "Updating existing platform checkout..."
   git -C "$PLATFORM_DIR" pull --ff-only || note "Pull failed (local changes?) - keeping current version."
 else
-  gh repo clone "$PLATFORM_REPO" "$PLATFORM_DIR" -- --depth 1
+  # Team machines need the pipeline + the plugin bundle, not client vaults or
+  # planning docs: sparse checkout keeps the clone lean.
+  gh repo clone "$PLATFORM_REPO" "$PLATFORM_DIR" -- --depth 1 --sparse
+  git -C "$PLATFORM_DIR" sparse-checkout set --cone huble-pipeline plugins
 fi
 HUBLE="$PLATFORM_DIR/huble-pipeline/bin/huble"
 [ -x "$HUBLE" ] || chmod +x "$HUBLE" 2>/dev/null || true
@@ -267,9 +270,26 @@ step "Done"
 if [ -n "$VAULT_PATH" ]; then
   note "Vault: $VAULT_PATH"
   if [ -z "${HUBLE_NO_OPEN:-}" ]; then
+    note "Registering the vault with Obsidian..."
+    # obsidian://open only resolves vaults Obsidian already knows about -
+    # register ours in obsidian.json first (same record Obsidian writes when
+    # you pick "Open folder as vault").
+    node -e '
+      const fs = require("fs"), path = require("path"), os = require("os");
+      const cfgDir = path.join(os.homedir(), "Library/Application Support/obsidian");
+      const cfgPath = path.join(cfgDir, "obsidian.json");
+      fs.mkdirSync(cfgDir, { recursive: true });
+      let cfg = {};
+      try { cfg = JSON.parse(fs.readFileSync(cfgPath, "utf8")); } catch {}
+      cfg.vaults = cfg.vaults || {};
+      const vaultPath = process.argv[1];
+      if (!Object.values(cfg.vaults).some(v => v.path === vaultPath)) {
+        const id = Array.from({length: 16}, () => "0123456789abcdef"[Math.floor(Math.random()*16)]).join("");
+        cfg.vaults[id] = { path: vaultPath, ts: Date.now(), open: true };
+        fs.writeFileSync(cfgPath, JSON.stringify(cfg));
+      }
+    ' "$VAULT_PATH"
     note "Opening the vault in Obsidian..."
-    # A freshly installed Obsidian has not registered the obsidian:// handler
-    # yet - launch the app itself first in that case.
     open "obsidian://open?path=$(printf '%s' "$VAULT_PATH" | sed 's/ /%20/g')" 2>/dev/null \
       || open -a Obsidian 2>/dev/null \
       || open "$HOME/Applications/Obsidian.app" 2>/dev/null || true
