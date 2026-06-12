@@ -296,6 +296,15 @@ if [ -z "$VAULT_MODE" ]; then
   esac
 fi
 
+# Role comes BEFORE vault setup so every install step (vault init included)
+# is role-scoped from the start — no all-roles install followed by a re-filter.
+ROLE="${HUBLE_ROLE:-}"
+if [ "$VAULT_MODE" != "skip" ] && [ -z "$ROLE" ]; then
+  note "cx/copy/seo also set the Atlas Inspector role; design/dev install only"
+  note "that stage's tooling and check out only its slice of the vault; all = admin."
+  ask "  Your role (cx / copy / seo / design / dev / all)" ROLE "cx"
+fi
+
 VAULT_PATH=""
 case "$VAULT_MODE" in
   clone)
@@ -313,21 +322,15 @@ case "$VAULT_MODE" in
     if [ -z "$CLIENT" ]; then ask "  Client name" CLIENT; fi
     [ -n "$CLIENT" ] || fail "Client name required."
     VAULT_PATH="$VAULTS_DIR/$CLIENT"
-    "$HUBLE" vault init --client "$CLIENT" --vault "$VAULT_PATH"
+    "$HUBLE" vault init --client "$CLIENT" --vault "$VAULT_PATH" --role "$ROLE"
     ;;
   skip)
     note "Skipping vault setup."
     ;;
 esac
 
-# ---------------------------------------------------------------- Role + plugin
+# ---------------------------------------------------------------- Plugin + role tooling
 if [ -n "$VAULT_PATH" ]; then
-  ROLE="${HUBLE_ROLE:-}"
-  if [ -z "$ROLE" ]; then
-    note "cx/copy/seo also set the Atlas Inspector role; design/dev install only"
-    note "that stage's tooling and check out only its slice of the vault; all = admin."
-    ask "  Your role (cx / copy / seo / design / dev / all)" ROLE "cx"
-  fi
   step "Installing the Atlas plugin (role: $ROLE)"
   "$HUBLE" cx init --vault "$VAULT_PATH" --role "$ROLE"
   ok "Atlas plugin installed and enabled, role set to $ROLE"
