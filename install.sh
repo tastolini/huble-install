@@ -13,7 +13,7 @@
 #   HUBLE_HOME=~/.huble           hidden tooling root (platform/node/npm/gh)
 #   HUBLE_VAULTS_DIR=/path        where vaults go (default: the launch folder)
 #   HUBLE_PLATFORM_REPO=tastolini/huble-platform
-#   HUBLE_ROLE=cx|copy|seo        skip the role prompt
+#   HUBLE_ROLE=cx|copy|seo|design|dev|all   skip the role prompt
 #   HUBLE_VAULT_MODE=new|clone|skip
 #   HUBLE_CLIENT_NAME="Client"    with HUBLE_VAULT_MODE=new
 #   HUBLE_VAULT_REPO=owner/repo   with HUBLE_VAULT_MODE=clone
@@ -324,7 +324,9 @@ esac
 if [ -n "$VAULT_PATH" ]; then
   ROLE="${HUBLE_ROLE:-}"
   if [ -z "$ROLE" ]; then
-    ask "  Your role (cx / copy / seo)" ROLE "cx"
+    note "cx/copy/seo also set the Atlas Inspector role; design/dev install only"
+    note "that stage's tooling and check out only its slice of the vault; all = admin."
+    ask "  Your role (cx / copy / seo / design / dev / all)" ROLE "cx"
   fi
   step "Installing the Atlas plugin (role: $ROLE)"
   "$HUBLE" cx init --vault "$VAULT_PATH" --role "$ROLE"
