@@ -181,20 +181,20 @@ else
     arm64) NODE_ARCH="arm64" ;;
     *)     NODE_ARCH="x64" ;;
   esac
-  NODE_VER="$(curl -fsSL https://nodejs.org/dist/index.json | sed -n 's/.*"version": *"\(v22[^"]*\)".*/\1/p' | head -1)"
   if command -v brew >/dev/null 2>&1; then
     note "Installing Node via Homebrew..."
     brew install node >/dev/null
-  elif $IS_ADMIN; then
-    note "Downloading the official Node.js installer..."
-    NODE_PKG="/tmp/node-$NODE_VER.pkg"
-    curl -fL --progress-bar -o "$NODE_PKG" "https://nodejs.org/dist/$NODE_VER/node-$NODE_VER-$NODE_ARCH.pkg"
-    note "Installing Node (asks for your password)..."
-    sudo installer -pkg "$NODE_PKG" -target / >/dev/null
-    rm -f "$NODE_PKG"
   else
-    # No admin rights: unpack the official tarball into $HUBLE_HOME/node.
-    note "Installing Node into $HUBLE_HOME/node (no password needed)..."
+    # Official tarball into $HUBLE_HOME/node — works with or without admin
+    # rights, no password, and keeps tooling hidden like everything else.
+    # (The old admin path downloaded node-<ver>-<arch>.pkg, which does not
+    # exist on nodejs.org — the macOS pkg is universal, no arch suffix — so
+    # every brew-less admin machine 404'd and aborted here.)
+    NODE_VER="$(curl -fsSL https://nodejs.org/dist/index.json | sed -n 's/.*"version": *"\(v22[^"]*\)".*/\1/p' | head -1)"
+    if [ -z "$NODE_VER" ]; then
+      fail "Could not determine the latest Node 22 version from nodejs.org (network/proxy issue?). Install Node 18+ manually (https://nodejs.org) and re-run this installer."
+    fi
+    note "Installing Node $NODE_VER into $HUBLE_HOME/node (no password needed)..."
     NODE_TAR="/tmp/node-$NODE_VER.tar.gz"
     curl -fL --progress-bar -o "$NODE_TAR" "https://nodejs.org/dist/$NODE_VER/node-$NODE_VER-darwin-$NODE_ARCH.tar.gz"
     rm -rf "$HUBLE_HOME/node"
