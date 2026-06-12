@@ -343,40 +343,75 @@ if [ -n "$VAULT_PATH" ]; then
   if [ -z "${HUBLE_NO_OPEN:-}" ]; then
     # Obsidian reads obsidian.json only at startup and REWRITES it from memory
     # on quit - registering while it runs gets ignored and then overwritten.
-    # Quit it first, register, then relaunch.
+    # Quit it first, WAIT FOR THE QUIT TO FULLY FINISH (a slow quit flushes
+    # obsidian.json after the 10s mark and silently clobbers our registration
+    # - seen in the field), register, relaunch, then VERIFY the entry survived.
     if pgrep -xq Obsidian; then
       note "Quitting Obsidian to register the vault..."
       osascript -e 'tell application "Obsidian" to quit' >/dev/null 2>&1 || true
-      for _ in 1 2 3 4 5 6 7 8 9 10; do
+      i=0
+      while [ "$i" -lt 30 ]; do
         pgrep -xq Obsidian || break
         sleep 1
+        i=$((i+1))
       done
+      if pgrep -xq Obsidian; then
+        note "Obsidian is still shutting down - skipping auto-registration."
+        note "Open the vault manually: vault picker > 'Open folder as vault' > $VAULT_PATH"
+      fi
+      # Let the final config flush land before we write.
+      sleep 2
     fi
+    register_vault() {
+      node -e '
+        const fs = require("fs"), path = require("path"), os = require("os");
+        const cfgDir = path.join(os.homedir(), "Library/Application Support/obsidian");
+        const cfgPath = path.join(cfgDir, "obsidian.json");
+        fs.mkdirSync(cfgDir, { recursive: true });
+        let cfg = {};
+        try { cfg = JSON.parse(fs.readFileSync(cfgPath, "utf8")); } catch {}
+        cfg.vaults = cfg.vaults || {};
+        const vaultPath = process.argv[1];
+        if (!Object.values(cfg.vaults).some(v => v.path === vaultPath)) {
+          const id = Array.from({length: 16}, () => "0123456789abcdef"[Math.floor(Math.random()*16)]).join("");
+          for (const v of Object.values(cfg.vaults)) delete v.open;
+          cfg.vaults[id] = { path: vaultPath, ts: Date.now(), open: true };
+          fs.writeFileSync(cfgPath, JSON.stringify(cfg));
+        }
+        process.stdout.write(encodeURIComponent(vaultPath));
+      ' "$VAULT_PATH"
+    }
+    vault_registered() {
+      node -e '
+        const fs = require("fs"), path = require("path"), os = require("os");
+        const cfgPath = path.join(os.homedir(), "Library/Application Support/obsidian/obsidian.json");
+        let cfg = {};
+        try { cfg = JSON.parse(fs.readFileSync(cfgPath, "utf8")); } catch {}
+        const ok = Object.values(cfg.vaults || {}).some(v => v.path === process.argv[1]);
+        process.exit(ok ? 0 : 1);
+      ' "$VAULT_PATH"
+    }
     note "Registering the vault with Obsidian..."
-    # Same record Obsidian writes when you pick "Open folder as vault".
-    node -e '
-      const fs = require("fs"), path = require("path"), os = require("os");
-      const cfgDir = path.join(os.homedir(), "Library/Application Support/obsidian");
-      const cfgPath = path.join(cfgDir, "obsidian.json");
-      fs.mkdirSync(cfgDir, { recursive: true });
-      let cfg = {};
-      try { cfg = JSON.parse(fs.readFileSync(cfgPath, "utf8")); } catch {}
-      cfg.vaults = cfg.vaults || {};
-      const vaultPath = process.argv[1];
-      if (!Object.values(cfg.vaults).some(v => v.path === vaultPath)) {
-        const id = Array.from({length: 16}, () => "0123456789abcdef"[Math.floor(Math.random()*16)]).join("");
-        for (const v of Object.values(cfg.vaults)) delete v.open;
-        cfg.vaults[id] = { path: vaultPath, ts: Date.now(), open: true };
-        fs.writeFileSync(cfgPath, JSON.stringify(cfg));
-      }
-      process.stdout.write(encodeURIComponent(vaultPath));
-    ' "$VAULT_PATH" > /tmp/huble-vault-url.txt
-    ENCODED_PATH="$(cat /tmp/huble-vault-url.txt)"
-    rm -f /tmp/huble-vault-url.txt
+    ENCODED_PATH="$(register_vault)"
     note "Opening the vault in Obsidian..."
     open "obsidian://open?path=$ENCODED_PATH" 2>/dev/null \
       || open -a Obsidian 2>/dev/null \
       || open "$HOME/Applications/Obsidian.app" 2>/dev/null || true
+    # Verify the registration survived the relaunch; a leftover quit-flush can
+    # still clobber it. One silent retry, then a loud manual instruction.
+    sleep 5
+    if ! vault_registered; then
+      note "Registration was overwritten - retrying once..."
+      ENCODED_PATH="$(register_vault)"
+      open "obsidian://open?path=$ENCODED_PATH" 2>/dev/null || true
+      sleep 5
+    fi
+    if vault_registered; then
+      note "Vault registered with Obsidian."
+    else
+      note "Could not register the vault automatically."
+      note "In Obsidian: vault picker (bottom-left) > 'Open folder as vault' > $VAULT_PATH"
+    fi
     note "Obsidian will ask you to trust the vault, then enable the Atlas plugin under Community plugins if prompted."
     note "If the vault does not open: in Obsidian's vault picker choose 'Open folder as vault' and select $VAULT_PATH"
   fi
