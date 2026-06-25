@@ -13,7 +13,8 @@
 #   HUBLE_HOME=~/.huble           hidden tooling root (platform/node/npm/gh)
 #   HUBLE_VAULTS_DIR=/path        where vaults go (default: the launch folder)
 #   HUBLE_PLATFORM_REPO=tastolini/huble-platform
-#   HUBLE_ROLE=cx|copy|seo|design|dev|all   skip the role prompt
+#   HUBLE_ROLE=cx|copy|seo                   skip the role prompt
+#                 (design|dev|all still valid here — advanced, not shown in the menu)
 #   HUBLE_VAULT_MODE=new|clone|skip
 #   HUBLE_CLIENT_NAME="Client"    with HUBLE_VAULT_MODE=new
 #   HUBLE_VAULT_REPO=owner/repo   with HUBLE_VAULT_MODE=clone
@@ -300,9 +301,9 @@ fi
 # is role-scoped from the start — no all-roles install followed by a re-filter.
 ROLE="${HUBLE_ROLE:-}"
 if [ "$VAULT_MODE" != "skip" ] && [ -z "$ROLE" ]; then
-  note "cx/copy/seo also set the Atlas Inspector role; design/dev install only"
-  note "that stage's tooling and check out only its slice of the vault; all = admin."
-  ask "  Your role (cx / copy / seo / design / dev / all)" ROLE "cx"
+  note "Your role sets the Atlas Inspector tab and installs only that stage's"
+  note "tooling + a sparse checkout of its slice of the vault."
+  ask "  Your role (cx / copy / seo)" ROLE "cx"
 fi
 
 VAULT_PATH=""
