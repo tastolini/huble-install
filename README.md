@@ -5,6 +5,12 @@ everything a team member needs — Obsidian, Node.js, GitHub access, the Huble
 platform, the Claude agent CLI — then clones or creates a client vault with
 the Atlas plugin preconfigured for your role (CX / Copy / SEO — each machine gets only its stage's tooling and a sparse checkout of just its slice of the vault).
 
+It also offers to install Homebrew + poppler (optional, consent-based —
+Homebrew's installer asks for your macOS password once): agents use poppler's
+`pdftoppm` to view PDF pages as images (brand guides, sitemap diagrams). If
+you decline or the install fails, everything else still works — agents fall
+back to extracted text, and you can add it later with `brew install poppler`.
+
 ```bash
 curl -fsSL https://raw.githubusercontent.com/tastolini/huble-install/main/install.sh | bash
 ```

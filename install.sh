@@ -86,6 +86,7 @@ MIN_NODE_MAJOR=18
 bold()  { printf '\033[1m%s\033[0m\n' "$*"; }
 step()  { printf '\n\033[1;34m==>\033[0m \033[1m%s\033[0m\n' "$*"; }
 ok()    { printf '\033[32m  OK %s\033[0m\n' "$*"; }
+warn()  { printf '\033[33m  ! %s\033[0m\n' "$*"; }
 note()  { printf '  - %s\n' "$*"; }
 fail()  { printf '\033[31m  X %s\033[0m\n' "$*" >&2; exit 1; }
 
@@ -279,6 +280,63 @@ else
   fi
   ok "Claude Code installed"
   note "After this installer finishes, run:  claude login"
+fi
+
+# ---------------------------------------------------------------- Poppler (PDF page rendering)
+# Agents view PDF pages as images through pdftoppm when reading a PDF (brand
+# guides, sitemap diagrams — anything where the text extraction alone is not
+# enough). The pipeline itself no longer needs poppler (PDF text conversion is
+# bundled), so this is agent tooling only: EVERY failure path below is
+# non-fatal — decline, curl failure, brew failure all warn and continue.
+step "Checking PDF page rendering (poppler)"
+poppler_unavailable() {
+  warn "PDF page rendering unavailable (agents will fall back to text sources); install later with: brew install poppler"
+}
+if command -v pdftoppm >/dev/null 2>&1; then
+  ok "poppler (pdftoppm)"
+else
+  if ! command -v brew >/dev/null 2>&1; then
+    if $IS_ADMIN; then
+      note "poppler installs via Homebrew, which is not on this Mac yet."
+      note "Why: agents render PDF pages as images with it - without it they can"
+      note "only read a PDF's extracted text (diagram-heavy PDFs become unreadable)."
+      note "Homebrew's official installer will ask for your macOS password once."
+      ask "  Install Homebrew now? (y/N)" INSTALL_BREW "n"
+      case "$INSTALL_BREW" in
+        [Yy]*)
+          BREW_INSTALL_SCRIPT="$(curl -fsSL https://raw.githubusercontent.com/Homebrew/install/HEAD/install.sh)" || BREW_INSTALL_SCRIPT=""
+          if [ -z "$BREW_INSTALL_SCRIPT" ]; then
+            warn "Could not download the Homebrew installer (network issue?)."
+          elif /bin/bash -c "$BREW_INSTALL_SCRIPT" < /dev/tty; then
+            # The Homebrew installer persists shellenv for future shells; make
+            # brew visible to THIS run too (Apple Silicon, then Intel).
+            if [ -x /opt/homebrew/bin/brew ]; then
+              eval "$(/opt/homebrew/bin/brew shellenv)"
+            elif [ -x /usr/local/bin/brew ]; then
+              eval "$(/usr/local/bin/brew shellenv)"
+            fi
+          else
+            warn "Homebrew install failed or was cancelled."
+          fi
+          ;;
+        *) note "Skipping Homebrew." ;;
+      esac
+    else
+      # Homebrew's installer needs an admin account - never prompt for a
+      # password this user does not have (same rule as the app installs).
+      note "poppler installs via Homebrew, which needs an admin account."
+    fi
+  fi
+  if command -v brew >/dev/null 2>&1; then
+    note "Installing poppler (PDF page rendering for agents)..."
+    if brew install poppler >/dev/null; then
+      ok "poppler (pdftoppm) installed"
+    else
+      poppler_unavailable
+    fi
+  else
+    poppler_unavailable
+  fi
 fi
 
 # ---------------------------------------------------------------- Client vault
