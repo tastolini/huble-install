@@ -328,10 +328,22 @@ else
     fi
   fi
   if command -v brew >/dev/null 2>&1; then
-    note "Installing poppler (PDF page rendering for agents)..."
-    if brew install poppler >/dev/null; then
-      ok "poppler (pdftoppm) installed"
+    # On shared Macs Homebrew is often installed (and owned) by another user
+    # account - brew install then fails with a wall of "not writable" errors
+    # and suggests a chown that would steal the other user's Homebrew.
+    # Preflight the prefix instead of letting brew crash into it.
+    BREW_PREFIX="$(brew --prefix 2>/dev/null)" || BREW_PREFIX=""
+    [ -n "$BREW_PREFIX" ] || BREW_PREFIX="$(dirname "$(dirname "$(command -v brew)")")"
+    if [ -w "$BREW_PREFIX/Cellar" ] || { [ ! -e "$BREW_PREFIX/Cellar" ] && [ -w "$BREW_PREFIX" ]; }; then
+      note "Installing poppler (PDF page rendering for agents)..."
+      if brew install poppler >/dev/null; then
+        ok "poppler (pdftoppm) installed"
+      else
+        poppler_unavailable
+      fi
     else
+      warn "Homebrew at $BREW_PREFIX is owned by another user account on this Mac."
+      warn "Ask that account to run: brew install poppler"
       poppler_unavailable
     fi
   else
