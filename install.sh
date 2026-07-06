@@ -13,8 +13,8 @@
 #   HUBLE_HOME=~/.huble           hidden tooling root (platform/node/npm/gh)
 #   HUBLE_VAULTS_DIR=/path        where vaults go (default: the launch folder)
 #   HUBLE_PLATFORM_REPO=tastolini/huble-platform
-#   HUBLE_ROLE=cx|copy|seo                   skip the role prompt
-#                 (design|dev|all still valid here — advanced, not shown in the menu)
+#   HUBLE_ROLE=cx|copy|seo|design|dev        skip the role prompt
+#                 (all still valid here — advanced, not shown in the menu)
 #   HUBLE_VAULT_MODE=new|clone|skip
 #   HUBLE_CLIENT_NAME="Client"    with HUBLE_VAULT_MODE=new
 #   HUBLE_VAULT_REPO=owner/repo   with HUBLE_VAULT_MODE=clone
@@ -99,6 +99,18 @@ ask() { # ask "Prompt" varname [default]
   IFS= read -r answer < /dev/tty || answer=""
   if [ -z "$answer" ]; then answer="$default"; fi
   eval "$var=\"\$answer\""
+}
+
+ask_role() { # ask_role varname - prompt until one of the five menu roles
+  local r
+  while :; do
+    ask "  Your role (cx / copy / seo / design / dev)" r "cx"
+    case "$r" in
+      cx|copy|seo|design|dev) break ;;
+      *) warn "Unknown role '$r' - choose one of: cx / copy / seo / design / dev" ;;
+    esac
+  done
+  eval "$1=\"\$r\""
 }
 
 [ "$(uname -s)" = "Darwin" ] || fail "This installer supports macOS only (for now)."
@@ -388,7 +400,7 @@ ROLE="${HUBLE_ROLE:-}"
 if [ "$VAULT_MODE" != "skip" ] && [ -z "$ROLE" ]; then
   note "Your role sets the Atlas Inspector tab and installs only that stage's"
   note "tooling + a sparse checkout of its slice of the vault."
-  ask "  Your role (cx / copy / seo)" ROLE "cx"
+  ask_role ROLE
 fi
 
 VAULT_PATH=""
