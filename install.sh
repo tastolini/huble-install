@@ -16,6 +16,7 @@
 #   HUBLE_ROLE=cx|copy|seo|design|dev        skip the role prompt
 #                 (all still valid here — advanced, not shown in the menu)
 #   HUBLE_VAULT_MODE=new|clone|skip
+#   HUBLE_VAULT_REINIT=/path|no   with skip: re-init that vault (or don't ask)
 #   HUBLE_CLIENT_NAME="Client"    with HUBLE_VAULT_MODE=new
 #   HUBLE_VAULT_REPO=owner/repo   with HUBLE_VAULT_MODE=clone
 #   HUBLE_NO_OPEN=1               don't open Obsidian at the end
@@ -111,6 +112,28 @@ ask_role() { # ask_role varname - prompt until one of the five menu roles
     esac
   done
   eval "$1=\"\$r\""
+}
+
+# Tiny JSON helpers for machine.json files (~/.huble remembers the last vault;
+# a vault's .huble remembers its role). Only called after the Node step.
+json_read() { # json_read file key -> stdout (empty if absent/unreadable)
+  node -e '
+    try {
+      const v = JSON.parse(require("fs").readFileSync(process.argv[1], "utf8"))[process.argv[2]];
+      if (typeof v === "string") process.stdout.write(v);
+    } catch {}
+  ' "$1" "$2" 2>/dev/null || true
+}
+json_write() { # json_write file key value - merge one key, keep the rest
+  node -e '
+    const fs = require("fs"), path = require("path");
+    const [file, key, value] = process.argv.slice(1);
+    let cfg = {};
+    try { cfg = JSON.parse(fs.readFileSync(file, "utf8")); } catch {}
+    cfg[key] = value;
+    fs.mkdirSync(path.dirname(file), { recursive: true });
+    fs.writeFileSync(file, JSON.stringify(cfg, null, 2) + "\n");
+  ' "$1" "$2" "$3"
 }
 
 [ "$(uname -s)" = "Darwin" ] || fail "This installer supports macOS only (for now)."
@@ -456,7 +479,42 @@ case "$VAULT_MODE" in
     "$HUBLE" vault init --client "$CLIENT" --vault "$VAULT_PATH" --role "$ROLE"
     ;;
   skip)
-    note "Skipping vault setup."
+    note "Skipping vault setup (no new vault created)."
+    # Re-runs default to skip, which used to leave the vault's plugin/skills/
+    # commands on the old version while the platform updated underneath.
+    # Offer a re-init of the existing vault so both move in lockstep;
+    # declining (explicit no / Enter / no tty) keeps plain skip behavior.
+    REINIT_VAULT="${HUBLE_VAULT_REINIT:-}"
+    if [ "$REINIT_VAULT" = "no" ]; then
+      REINIT_VAULT=""
+    elif [ -z "$REINIT_VAULT" ]; then
+      LAST_VAULT="$(json_read "$HUBLE_HOME/machine.json" lastVault)"
+      if [ -n "$LAST_VAULT" ] && [ ! -d "$LAST_VAULT" ]; then LAST_VAULT=""; fi
+      if ( : < /dev/tty ) 2>/dev/null; then
+        if [ -n "$LAST_VAULT" ]; then
+          ask "  Update the vault at $LAST_VAULT too (plugin/skills/commands)? (Y/n)" UPDATE_VAULT "y"
+          case "$UPDATE_VAULT" in [Yy]*) REINIT_VAULT="$LAST_VAULT" ;; esac
+        else
+          ask "  Update an existing vault's plugin/skills/commands too? (y/N)" UPDATE_VAULT "n"
+          case "$UPDATE_VAULT" in
+            [Yy]*) ask "  Vault path" REINIT_VAULT ;;
+          esac
+        fi
+      fi
+    fi
+    if [ -n "$REINIT_VAULT" ]; then
+      [ -d "$REINIT_VAULT" ] || fail "No vault folder at $REINIT_VAULT."
+      # The vault remembers its role; only ask (and persist) when it doesn't.
+      REINIT_ROLE="$(json_read "$REINIT_VAULT/.huble/machine.json" role)"
+      if [ -z "$REINIT_ROLE" ]; then
+        ask_role REINIT_ROLE
+        json_write "$REINIT_VAULT/.huble/machine.json" role "$REINIT_ROLE"
+      fi
+      note "Updating the vault's plugin/skills/commands (role: $REINIT_ROLE)..."
+      "$HUBLE" cx init --vault "$REINIT_VAULT" --role "$REINIT_ROLE"
+      json_write "$HUBLE_HOME/machine.json" lastVault "$REINIT_VAULT"
+      ok "Vault at $REINIT_VAULT updated in lockstep with the platform"
+    fi
     ;;
 esac
 
@@ -464,6 +522,10 @@ esac
 if [ -n "$VAULT_PATH" ]; then
   step "Installing the Atlas plugin (role: $ROLE)"
   "$HUBLE" cx init --vault "$VAULT_PATH" --role "$ROLE"
+  # Remember this vault + role so a future skip-mode re-run can offer the
+  # lockstep vault update without re-asking for everything.
+  json_write "$HUBLE_HOME/machine.json" lastVault "$VAULT_PATH"
+  json_write "$VAULT_PATH/.huble/machine.json" role "$ROLE"
   ok "Atlas plugin installed and enabled, role set to $ROLE"
 fi
 
