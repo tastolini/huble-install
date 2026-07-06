@@ -148,11 +148,15 @@ if groups 2>/dev/null | tr ' ' '\n' | grep -qx admin; then IS_ADMIN=true; fi
 # Make user-level tool locations visible to this run AND future shells.
 export PATH="$HUBLE_HOME/bin:$HUBLE_HOME/node/bin:$HUBLE_HOME/npm-global/bin:$PATH"
 ensure_path_persisted() {
-  # ~/.zprofile is the primary (macOS ships zsh). ~/.bash_profile is appended
-  # only when it already exists - creating one would change bash's startup
-  # file resolution (~/.bash_profile shadows ~/.profile).
+  # ~/.zprofile is the primary (macOS ships zsh), but a customized ~/.zshrc
+  # that resets PATH runs AFTER it and silently drops our block - seen in the
+  # field as `command not found: huble` in every new terminal. Append to
+  # ~/.zshrc too: it runs last for interactive shells (login or not), so the
+  # block survives PATH-resetting dotfiles. ~/.bash_profile is appended only
+  # when it already exists - creating one would change bash's startup file
+  # resolution (~/.bash_profile shadows ~/.profile).
   local marker="# huble-installer PATH" profile
-  for profile in "$HOME/.zprofile" "$HOME/.bash_profile"; do
+  for profile in "$HOME/.zprofile" "$HOME/.zshrc" "$HOME/.bash_profile"; do
     if [ "$profile" = "$HOME/.bash_profile" ] && [ ! -f "$profile" ]; then continue; fi
     if ! grep -qs "$marker" "$profile" 2>/dev/null; then
       printf '\n%s\nexport PATH="%s/bin:%s/node/bin:%s/npm-global/bin:$PATH"\n' \
@@ -610,7 +614,7 @@ if [ -n "$VAULT_PATH" ]; then
   fi
 fi
 note "Platform: $PLATFORM_DIR  (re-run this installer any time to update everything)"
-note "The huble command is on your PATH in new terminals (this shell already has it)."
+note "The huble command works in NEW terminals (this one: run  source ~/.zshrc  first)."
 if ! command -v claude >/dev/null 2>&1 || ! [ -e "$HOME/.claude" ]; then
   note "Remember to authenticate the agent CLI once:  claude login"
 fi
