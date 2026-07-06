@@ -81,7 +81,7 @@ PLATFORM_DIR="$HUBLE_HOME/platform"
 LAUNCH_DIR="$(pwd)"
 if [ "$LAUNCH_DIR" = "/" ] || [ ! -w "$LAUNCH_DIR" ]; then LAUNCH_DIR="$HOME"; fi
 VAULTS_DIR="${HUBLE_VAULTS_DIR:-$LAUNCH_DIR}"
-MIN_NODE_MAJOR=18
+MIN_NODE_MAJOR=24   # the dex task CLI (@zeeg/dex) requires Node >= 24
 
 bold()  { printf '\033[1m%s\033[0m\n' "$*"; }
 step()  { printf '\n\033[1;34m==>\033[0m \033[1m%s\033[0m\n' "$*"; }
@@ -196,7 +196,11 @@ step "Checking Node.js (>= $MIN_NODE_MAJOR)"
 node_ok=false
 if command -v node >/dev/null 2>&1; then
   NODE_MAJOR="$(node -p 'process.versions.node.split(".")[0]')"
-  if [ "$NODE_MAJOR" -ge "$MIN_NODE_MAJOR" ]; then node_ok=true; fi
+  if [ "$NODE_MAJOR" -ge "$MIN_NODE_MAJOR" ]; then
+    node_ok=true
+  else
+    note "Node $(node --version) is too old - the dex CLI needs Node >= $MIN_NODE_MAJOR. Upgrading..."
+  fi
 fi
 if $node_ok; then
   ok "Node $(node --version)"
@@ -207,16 +211,18 @@ else
   esac
   if command -v brew >/dev/null 2>&1; then
     note "Installing Node via Homebrew..."
-    brew install node >/dev/null
+    # An outdated brew node makes `brew install` error out with an "already
+    # installed, run brew upgrade" hint - follow that hint automatically.
+    brew install node >/dev/null 2>&1 || brew upgrade node >/dev/null
   else
     # Official tarball into $HUBLE_HOME/node — works with or without admin
     # rights, no password, and keeps tooling hidden like everything else.
     # (The old admin path downloaded node-<ver>-<arch>.pkg, which does not
     # exist on nodejs.org — the macOS pkg is universal, no arch suffix — so
     # every brew-less admin machine 404'd and aborted here.)
-    NODE_VER="$(curl -fsSL https://nodejs.org/dist/index.json | sed -n 's/.*"version": *"\(v22[^"]*\)".*/\1/p' | head -1)"
+    NODE_VER="$(curl -fsSL https://nodejs.org/dist/index.json | sed -n 's/.*"version": *"\(v24[^"]*\)".*/\1/p' | head -1)"
     if [ -z "$NODE_VER" ]; then
-      fail "Could not determine the latest Node 22 version from nodejs.org (network/proxy issue?). Install Node 18+ manually (https://nodejs.org) and re-run this installer."
+      fail "Could not determine the latest Node 24 version from nodejs.org (network/proxy issue?). Install Node $MIN_NODE_MAJOR+ manually (https://nodejs.org) and re-run this installer."
     fi
     note "Installing Node $NODE_VER into $HUBLE_HOME/node (no password needed)..."
     NODE_TAR="/tmp/node-$NODE_VER.tar.gz"
@@ -226,6 +232,12 @@ else
     tar -xzf "$NODE_TAR" -C "$HUBLE_HOME/node" --strip-components 1
     rm -f "$NODE_TAR"
     ensure_path_persisted
+  fi
+  # An older node earlier in PATH (e.g. a pinned node@18 keg) can shadow the
+  # fresh install - verify what actually resolves before moving on.
+  NODE_MAJOR="$(node -p 'process.versions.node.split(".")[0]' 2>/dev/null || echo 0)"
+  if [ "$NODE_MAJOR" -lt "$MIN_NODE_MAJOR" ]; then
+    fail "Node $(node --version 2>/dev/null || echo '?') still resolves after the install - an older Node earlier in your PATH is shadowing it. The dex CLI needs Node >= $MIN_NODE_MAJOR: remove or upgrade the old Node (https://nodejs.org) and re-run this installer."
   fi
   ok "Node $(node --version) installed"
 fi
