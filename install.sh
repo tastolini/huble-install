@@ -309,6 +309,27 @@ else
   note "After this installer finishes, run:  claude login"
 fi
 
+# ---------------------------------------------------------------- dex (task tracker CLI)
+step "Checking dex (task tracker CLI)"
+if command -v dex >/dev/null 2>&1; then
+  ok "dex $(dex --version 2>/dev/null | head -1 || true)"
+else
+  note "Installing dex..."
+  # Same fallback chain as Claude Code above: plain npm -g, then sudo for
+  # admins, then a user-level npm prefix for everyone else.
+  if ! npm install -g @zeeg/dex >/dev/null 2>&1; then
+    if $IS_ADMIN; then
+      sudo npm install -g @zeeg/dex >/dev/null
+    else
+      # npm's global prefix is not writable: use a user-level prefix instead.
+      npm config set prefix "$HUBLE_HOME/npm-global"
+      npm install -g @zeeg/dex >/dev/null
+      ensure_path_persisted
+    fi
+  fi
+  ok "dex installed"
+fi
+
 # ---------------------------------------------------------------- Poppler (PDF page rendering)
 # Agents view PDF pages as images through pdftoppm when reading a PDF (brand
 # guides, sitemap diagrams — anything where the text extraction alone is not
