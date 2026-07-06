@@ -113,11 +113,17 @@ if groups 2>/dev/null | tr ' ' '\n' | grep -qx admin; then IS_ADMIN=true; fi
 # Make user-level tool locations visible to this run AND future shells.
 export PATH="$HUBLE_HOME/bin:$HUBLE_HOME/node/bin:$HUBLE_HOME/npm-global/bin:$PATH"
 ensure_path_persisted() {
-  local profile="$HOME/.zprofile" marker="# huble-installer PATH"
-  if ! grep -qs "$marker" "$profile" 2>/dev/null; then
-    printf '\n%s\nexport PATH="%s/bin:%s/node/bin:%s/npm-global/bin:$PATH"\n' \
-      "$marker" "$HUBLE_HOME" "$HUBLE_HOME" "$HUBLE_HOME" >> "$profile"
-  fi
+  # ~/.zprofile is the primary (macOS ships zsh). ~/.bash_profile is appended
+  # only when it already exists - creating one would change bash's startup
+  # file resolution (~/.bash_profile shadows ~/.profile).
+  local marker="# huble-installer PATH" profile
+  for profile in "$HOME/.zprofile" "$HOME/.bash_profile"; do
+    if [ "$profile" = "$HOME/.bash_profile" ] && [ ! -f "$profile" ]; then continue; fi
+    if ! grep -qs "$marker" "$profile" 2>/dev/null; then
+      printf '\n%s\nexport PATH="%s/bin:%s/node/bin:%s/npm-global/bin:$PATH"\n' \
+        "$marker" "$HUBLE_HOME" "$HUBLE_HOME" "$HUBLE_HOME" >> "$profile"
+    fi
+  done
 }
 
 bold ""
@@ -125,6 +131,10 @@ bold "Huble platform installer"
 note "Tooling (hidden): $HUBLE_HOME"
 note "Vaults go to: $VAULTS_DIR  (run the installer from the folder where you want them)"
 mkdir -p "$HUBLE_HOME" "$VAULTS_DIR"
+# Persist the PATH block unconditionally - brew-based installs never hit the
+# fallback branches that used to be the only callers, so `huble` (and any
+# user-level tooling) was missing from new terminals on those machines.
+ensure_path_persisted
 
 # ---------------------------------------------------------------- Xcode CLT / git
 step "Checking developer tools (git)"
@@ -260,6 +270,11 @@ fi
 HUBLE="$PLATFORM_DIR/huble-pipeline/bin/huble"
 [ -x "$HUBLE" ] || chmod +x "$HUBLE" 2>/dev/null || true
 [ -f "$HUBLE" ] || fail "Platform clone incomplete: $HUBLE not found."
+# Bare `huble` must work in any terminal - the README and the pipeline's own
+# output tell users to run it unprefixed, so link it into the PATH dir the
+# installer persists above.
+mkdir -p "$HUBLE_HOME/bin"
+ln -sf "$HUBLE" "$HUBLE_HOME/bin/huble"
 ok "Platform at $PLATFORM_DIR"
 
 # ---------------------------------------------------------------- Claude Code CLI
@@ -488,6 +503,7 @@ if [ -n "$VAULT_PATH" ]; then
   fi
 fi
 note "Platform: $PLATFORM_DIR  (re-run this installer any time to update everything)"
+note "The huble command is on your PATH in new terminals (this shell already has it)."
 if ! command -v claude >/dev/null 2>&1 || ! [ -e "$HOME/.claude" ]; then
   note "Remember to authenticate the agent CLI once:  claude login"
 fi
