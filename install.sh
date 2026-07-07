@@ -240,7 +240,13 @@ else
     note "Installing Node via Homebrew..."
     # An outdated brew node makes `brew install` error out with an "already
     # installed, run brew upgrade" hint - follow that hint automatically.
-    brew install node >/dev/null 2>&1 || brew upgrade node >/dev/null
+    # stdin comes from /dev/null: under `curl | bash` OUR stdin IS the script
+    # pipe, and a child that reads it eats the rest of the script (the parent
+    # then exits silently at "EOF"). Same rule for every brew/npm child below.
+    if ! brew install node </dev/null >/dev/null 2>&1; then
+      brew upgrade node </dev/null >/dev/null 2>&1 \
+        || warn "Homebrew could not install Node - checking what resolves anyway..."
+    fi
   else
     # Official tarball into $HUBLE_HOME/node — works with or without admin
     # rights, no password, and keeps tooling hidden like everything else.
@@ -274,7 +280,8 @@ step "Checking GitHub access"
 if ! command -v gh >/dev/null 2>&1; then
   if command -v brew >/dev/null 2>&1; then
     note "Installing GitHub CLI via Homebrew..."
-    brew install gh >/dev/null
+    brew install gh </dev/null >/dev/null \
+      || fail "Homebrew could not install the GitHub CLI (required). Run: brew install gh  - then re-run this installer."
   else
     note "Installing GitHub CLI..."
     GH_TAG="$(curl -fsSL https://api.github.com/repos/cli/cli/releases/latest | sed -n 's/.*"tag_name": *"\([^"]*\)".*/\1/p')"
@@ -334,18 +341,24 @@ if command -v claude >/dev/null 2>&1; then
   ok "Claude Code $(claude --version 2>/dev/null | head -1 || true)"
 else
   note "Installing Claude Code..."
-  if ! npm install -g @anthropic-ai/claude-code >/dev/null 2>&1; then
+  claude_installed=true
+  if ! npm install -g @anthropic-ai/claude-code </dev/null >/dev/null 2>&1; then
     if $IS_ADMIN; then
-      sudo npm install -g @anthropic-ai/claude-code >/dev/null
+      sudo npm install -g @anthropic-ai/claude-code </dev/null >/dev/null || claude_installed=false
     else
       # npm's global prefix is not writable: use a user-level prefix instead.
       npm config set prefix "$HUBLE_HOME/npm-global"
-      npm install -g @anthropic-ai/claude-code >/dev/null
+      npm install -g @anthropic-ai/claude-code </dev/null >/dev/null || claude_installed=false
       ensure_path_persisted
     fi
   fi
-  ok "Claude Code installed"
-  note "After this installer finishes, run:  claude login"
+  if $claude_installed; then
+    ok "Claude Code installed"
+    note "After this installer finishes, run:  claude login"
+  else
+    # Not vault-blocking - keep going and let the user add it afterwards.
+    warn "Claude Code install failed - install later with: npm install -g @anthropic-ai/claude-code"
+  fi
 fi
 
 # ---------------------------------------------------------------- dex (task tracker CLI)
@@ -356,85 +369,22 @@ else
   note "Installing dex..."
   # Same fallback chain as Claude Code above: plain npm -g, then sudo for
   # admins, then a user-level npm prefix for everyone else.
-  if ! npm install -g @zeeg/dex >/dev/null 2>&1; then
+  dex_installed=true
+  if ! npm install -g @zeeg/dex </dev/null >/dev/null 2>&1; then
     if $IS_ADMIN; then
-      sudo npm install -g @zeeg/dex >/dev/null
+      sudo npm install -g @zeeg/dex </dev/null >/dev/null || dex_installed=false
     else
       # npm's global prefix is not writable: use a user-level prefix instead.
       npm config set prefix "$HUBLE_HOME/npm-global"
-      npm install -g @zeeg/dex >/dev/null
+      npm install -g @zeeg/dex </dev/null >/dev/null || dex_installed=false
       ensure_path_persisted
     fi
   fi
-  ok "dex installed"
-fi
-
-# ---------------------------------------------------------------- Poppler (PDF page rendering)
-# Agents view PDF pages as images through pdftoppm when reading a PDF (brand
-# guides, sitemap diagrams — anything where the text extraction alone is not
-# enough). The pipeline itself no longer needs poppler (PDF text conversion is
-# bundled), so this is agent tooling only: EVERY failure path below is
-# non-fatal — decline, curl failure, brew failure all warn and continue.
-step "Checking PDF page rendering (poppler)"
-poppler_unavailable() {
-  warn "PDF page rendering unavailable (agents will fall back to text sources); install later with: brew install poppler"
-}
-if command -v pdftoppm >/dev/null 2>&1; then
-  ok "poppler (pdftoppm)"
-else
-  if ! command -v brew >/dev/null 2>&1; then
-    if $IS_ADMIN; then
-      note "poppler installs via Homebrew, which is not on this Mac yet."
-      note "Why: agents render PDF pages as images with it - without it they can"
-      note "only read a PDF's extracted text (diagram-heavy PDFs become unreadable)."
-      note "Homebrew's official installer will ask for your macOS password once."
-      ask "  Install Homebrew now? (y/N)" INSTALL_BREW "n"
-      case "$INSTALL_BREW" in
-        [Yy]*)
-          BREW_INSTALL_SCRIPT="$(curl -fsSL https://raw.githubusercontent.com/Homebrew/install/HEAD/install.sh)" || BREW_INSTALL_SCRIPT=""
-          if [ -z "$BREW_INSTALL_SCRIPT" ]; then
-            warn "Could not download the Homebrew installer (network issue?)."
-          elif /bin/bash -c "$BREW_INSTALL_SCRIPT" < /dev/tty; then
-            # The Homebrew installer persists shellenv for future shells; make
-            # brew visible to THIS run too (Apple Silicon, then Intel).
-            if [ -x /opt/homebrew/bin/brew ]; then
-              eval "$(/opt/homebrew/bin/brew shellenv)"
-            elif [ -x /usr/local/bin/brew ]; then
-              eval "$(/usr/local/bin/brew shellenv)"
-            fi
-          else
-            warn "Homebrew install failed or was cancelled."
-          fi
-          ;;
-        *) note "Skipping Homebrew." ;;
-      esac
-    else
-      # Homebrew's installer needs an admin account - never prompt for a
-      # password this user does not have (same rule as the app installs).
-      note "poppler installs via Homebrew, which needs an admin account."
-    fi
-  fi
-  if command -v brew >/dev/null 2>&1; then
-    # On shared Macs Homebrew is often installed (and owned) by another user
-    # account - brew install then fails with a wall of "not writable" errors
-    # and suggests a chown that would steal the other user's Homebrew.
-    # Preflight the prefix instead of letting brew crash into it.
-    BREW_PREFIX="$(brew --prefix 2>/dev/null)" || BREW_PREFIX=""
-    [ -n "$BREW_PREFIX" ] || BREW_PREFIX="$(dirname "$(dirname "$(command -v brew)")")"
-    if [ -w "$BREW_PREFIX/Cellar" ] || { [ ! -e "$BREW_PREFIX/Cellar" ] && [ -w "$BREW_PREFIX" ]; }; then
-      note "Installing poppler (PDF page rendering for agents)..."
-      if brew install poppler >/dev/null; then
-        ok "poppler (pdftoppm) installed"
-      else
-        poppler_unavailable
-      fi
-    else
-      warn "Homebrew at $BREW_PREFIX is owned by another user account on this Mac."
-      warn "Ask that account to run: brew install poppler"
-      poppler_unavailable
-    fi
+  if $dex_installed; then
+    ok "dex installed"
   else
-    poppler_unavailable
+    # Not vault-blocking - keep going and let the user add it afterwards.
+    warn "dex install failed - install later with: npm install -g @zeeg/dex"
   fi
 fi
 
@@ -531,6 +481,93 @@ if [ -n "$VAULT_PATH" ]; then
   json_write "$HUBLE_HOME/machine.json" lastVault "$VAULT_PATH"
   json_write "$VAULT_PATH/.huble/machine.json" role "$ROLE"
   ok "Atlas plugin installed and enabled, role set to $ROLE"
+fi
+
+# ---------------------------------------------------------------- Poppler (PDF page rendering)
+# Agents view PDF pages as images through pdftoppm when reading a PDF (brand
+# guides, sitemap diagrams - anything where the text extraction alone is not
+# enough). The pipeline itself no longer needs poppler (PDF text conversion is
+# bundled), so this is agent tooling only: EVERY failure path below is
+# non-fatal - decline, curl failure, brew failure all warn and continue.
+# This step runs LAST on purpose: it is the only step that may spawn the
+# Homebrew installer (sudo + Command Line Tools phases), and a first run must
+# reach the vault payoff before the one fragile step.
+step "Checking PDF page rendering (poppler)"
+poppler_unavailable() {
+  warn "PDF page rendering unavailable (agents will fall back to text sources); install later with: brew install poppler"
+}
+if command -v pdftoppm >/dev/null 2>&1; then
+  ok "poppler (pdftoppm)"
+else
+  if ! command -v brew >/dev/null 2>&1; then
+    if $IS_ADMIN; then
+      note "poppler installs via Homebrew, which is not on this Mac yet."
+      note "Why: agents render PDF pages as images with it - without it they can"
+      note "only read a PDF's extracted text (diagram-heavy PDFs become unreadable)."
+      note "Homebrew's official installer will ask for your macOS password once."
+      ask "  Install Homebrew now? (y/N)" INSTALL_BREW "n"
+      case "$INSTALL_BREW" in
+        [Yy]*)
+          BREW_INSTALL_SCRIPT="$(curl -fsSL https://raw.githubusercontent.com/Homebrew/install/HEAD/install.sh </dev/null)" || BREW_INSTALL_SCRIPT=""
+          if [ -z "$BREW_INSTALL_SCRIPT" ]; then
+            warn "Could not download the Homebrew installer (network issue?)."
+          else
+            # The Homebrew installer's sudo/CLT phase can SIGINT our whole
+            # process group, killing this script silently. Shield the parent
+            # with a ':' INT handler (a real handler, NOT SIG_IGN, so the
+            # child stays Ctrl-C-able) and capture the child's status
+            # explicitly instead of letting set -e or the default INT
+            # disposition decide our fate. The child talks to the terminal
+            # directly - never to our script pipe.
+            trap ':' INT
+            set +e
+            /bin/bash -c "$BREW_INSTALL_SCRIPT" </dev/tty >/dev/tty 2>&1
+            BREW_INSTALL_STATUS=$?
+            set -e
+            trap - INT
+            if [ "$BREW_INSTALL_STATUS" -eq 0 ]; then
+              # The Homebrew installer persists shellenv for future shells;
+              # make brew visible to THIS run too (Apple Silicon, then Intel).
+              if [ -x /opt/homebrew/bin/brew ]; then
+                eval "$(/opt/homebrew/bin/brew shellenv)"
+              elif [ -x /usr/local/bin/brew ]; then
+                eval "$(/usr/local/bin/brew shellenv)"
+              fi
+            else
+              warn "Homebrew install failed or was cancelled."
+            fi
+          fi
+          ;;
+        *) note "Skipping Homebrew." ;;
+      esac
+    else
+      # Homebrew's installer needs an admin account - never prompt for a
+      # password this user does not have (same rule as the app installs).
+      note "poppler installs via Homebrew, which needs an admin account."
+    fi
+  fi
+  if command -v brew >/dev/null 2>&1; then
+    # On shared Macs Homebrew is often installed (and owned) by another user
+    # account - brew install then fails with a wall of "not writable" errors
+    # and suggests a chown that would steal the other user's Homebrew.
+    # Preflight the prefix instead of letting brew crash into it.
+    BREW_PREFIX="$(brew --prefix 2>/dev/null)" || BREW_PREFIX=""
+    [ -n "$BREW_PREFIX" ] || BREW_PREFIX="$(dirname "$(dirname "$(command -v brew)")")"
+    if [ -w "$BREW_PREFIX/Cellar" ] || { [ ! -e "$BREW_PREFIX/Cellar" ] && [ -w "$BREW_PREFIX" ]; }; then
+      note "Installing poppler (PDF page rendering for agents)..."
+      if brew install poppler </dev/null >/dev/null; then
+        ok "poppler (pdftoppm) installed"
+      else
+        poppler_unavailable
+      fi
+    else
+      warn "Homebrew at $BREW_PREFIX is owned by another user account on this Mac."
+      warn "Ask that account to run: brew install poppler"
+      poppler_unavailable
+    fi
+  else
+    poppler_unavailable
+  fi
 fi
 
 # ---------------------------------------------------------------- Done

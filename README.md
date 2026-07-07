@@ -7,11 +7,17 @@ creates a client vault with the Atlas plugin preconfigured for your role
 (CX / Copy / SEO / Design / Dev — each machine gets only its stage's tooling
 and a sparse checkout of just its slice of the vault).
 
-It also offers to install Homebrew + poppler (optional, consent-based —
-Homebrew's installer asks for your macOS password once): agents use poppler's
-`pdftoppm` to view PDF pages as images (brand guides, sitemap diagrams). If
-you decline or the install fails, everything else still works — agents fall
-back to extracted text, and you can add it later with `brew install poppler`.
+As its **last** step — after your vault is fully set up — it also offers to
+install Homebrew + poppler (optional, consent-based — Homebrew's installer
+asks for your macOS password once): agents use poppler's `pdftoppm` to view
+PDF pages as images (brand guides, sitemap diagrams). If you decline or the
+install fails, everything else still works — agents fall back to extracted
+text, and you can add it later with `brew install poppler`.
+
+Homebrew is never **required**: the installer's own toolchain (Node, the
+GitHub CLI, npm packages) installs without it, and Homebrew is only offered
+for poppler. If brew is already on the machine, the installer uses it where
+it helps.
 
 ```bash
 curl -fsSL https://raw.githubusercontent.com/tastolini/huble-install/main/install.sh | bash
